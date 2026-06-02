@@ -1,0 +1,43 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+artifacts/
+[Dd]ebug/
+[Rr]elease/
+TestResults/
+*.trx
+*.coverage
+*.nupkg
+
+# Node
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+npm-debug.log*
+
+# EF Core / SQLite local data
+*.db
+*.db-shm
+*.db-wal
+
+# Env / secrets
+.env
+.env.local
+*.local.json
+appsettings.Development.local.json
+
+# Editors / OS
+.vs/
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
+
+# Solver scratch
+solver-logs/
+*.pb.gz
+!demo/traces/*.pb.gz

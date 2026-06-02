@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # Phase 0's container check. The dev machine has no WSL, so Linux containers
+  # cannot run locally — this job is where the glibc/RID/native-load path is
+  # actually proven. It must stay green: if OR-Tools ever fails to load on the
+  # runtime image, this is the only thing that catches it before deploy.
+  container-check:
+    name: OR-Tools native runtime on 10.0-noble
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build spike image
+        run: docker build -f spike/Dockerfile -t shiftreason-spike .
+
+      - name: Run solver checks inside the container
+        run: docker run --rm --cpus=4 shiftreason-spike
+
+      - name: Report published image size
+        run: |
+          echo "### Image size" >> "$GITHUB_STEP_SUMMARY"
+          docker images shiftreason-spike --format '{{.Size}}' >> "$GITHUB_STEP_SUMMARY"
+          # A non-RID publish drags in all five runtimes/<rid>/native folders.
+          # If this balloons past a few hundred MB, the -r linux-x64 prune broke.
