@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ShiftReason.Api/ShiftReason.Api.csproj" />
+    <Project Path="src/ShiftReason.Domain/ShiftReason.Domain.csproj" />
+    <Project Path="src/ShiftReason.Solver/ShiftReason.Solver.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ShiftReason.Solver.Tests/ShiftReason.Solver.Tests.csproj" />
+  </Folder>
+</Solution>
