@@ -34,10 +34,11 @@ public sealed class GuardedRosterModel
     private readonly List<DateOnly> _dates;
     private readonly int _offIndex;
 
-    private GuardedRosterModel(Scenario scenario, SolveMode mode)
+    private GuardedRosterModel(Scenario scenario, SolveMode mode, IReadOnlySet<string>? relaxedRuleIds)
     {
         Scenario = scenario;
         Mode = mode;
+        RelaxedRuleIds = relaxedRuleIds ?? new HashSet<string>(StringComparer.Ordinal);
 
         _shifts = scenario.ShiftTypes.OrderBy(s => s.Index).ToList();
         _dates = scenario.Dates.ToList();
@@ -73,7 +74,22 @@ public sealed class GuardedRosterModel
     /// </remarks>
     public IReadOnlyDictionary<int, RuleRef> ByLiteralIndex => _byLiteralIndex;
 
-    public static GuardedRosterModel Build(Scenario scenario, SolveMode mode) => new(scenario, mode);
+    /// <summary>
+    /// Rules the user has chosen to give up. Their guards are pinned off, so the
+    /// constraint is present in the model but never enforced.
+    /// </summary>
+    /// <remarks>
+    /// This is how "relax this rule and re-solve" works, and why it is modelled as
+    /// a guard rather than by rebuilding a trimmed scenario: the rule keeps its
+    /// identity, so the resulting run can still be diffed against its parent and
+    /// the UI can say exactly what was given up.
+    /// </remarks>
+    public IReadOnlySet<string> RelaxedRuleIds { get; }
+
+    public static GuardedRosterModel Build(
+        Scenario scenario,
+        SolveMode mode,
+        IReadOnlySet<string>? relaxedRuleIds = null) => new(scenario, mode, relaxedRuleIds);
 
     // ------------------------------------------------------------------
     // Variables
@@ -344,25 +360,35 @@ public sealed class GuardedRosterModel
 
     private void ApplyMode()
     {
+        // A rule the user has already given up is pinned off in every mode: it
+        // cannot be blamed for a later conflict, and it cannot be "relaxed" twice.
+        foreach (var (lit, rule) in _guards.Where(g => RelaxedRuleIds.Contains(g.Rule.RuleId)))
+        {
+            _ = rule;
+            Model.Add(lit == 0);
+        }
+
+        var live = _guards.Where(g => !RelaxedRuleIds.Contains(g.Rule.RuleId)).ToList();
+
         switch (Mode)
         {
             case SolveMode.Optimize:
                 // Guards pinned on: the model behaves as if every rule were a
                 // plain hard constraint.
-                foreach (var (lit, _) in _guards) Model.Add(lit == 1);
+                foreach (var (lit, _) in live) Model.Add(lit == 1);
                 break;
 
             case SolveMode.Explain:
                 // No objective, ever. An objective silently degrades the core to
                 // "all assumptions" with no status code to detect it.
-                Model.AddAssumptions(_guards.Select(g => (ILiteral)g.Lit));
+                Model.AddAssumptions(live.Select(g => (ILiteral)g.Lit));
                 break;
 
             case SolveMode.Relax:
                 // Minimum-cost correction set: which rules, weighted by what it
                 // costs the ward to break them, must give way.
                 var cost = LinearExpr.NewBuilder();
-                foreach (var (lit, rule) in _guards) cost.AddTerm(lit.Not(), rule.RelaxCost);
+                foreach (var (lit, rule) in live) cost.AddTerm(lit.Not(), rule.RelaxCost);
                 Model.Minimize(cost);
                 break;
 
@@ -414,9 +440,15 @@ public sealed class GuardedRosterModel
         return new Roster(assignments);
     }
 
-    /// <summary>Rules whose guard came back false — i.e. the ones a Relax solve chose to break.</summary>
-    public IReadOnlyList<RuleRef> RelaxedRules(Func<BoolVar, bool> valueOf) =>
-        _guards.Where(g => !valueOf(g.Lit)).Select(g => g.Rule).ToList();
+    /// <summary>
+    /// Rules a Relax solve chose to break — excluding any the user had already
+    /// given up, whose guards are pinned off and would otherwise read as fresh
+    /// recommendations.
+    /// </summary>
+    public IReadOnlyList<RuleRef> NewlyRelaxedRules(Func<BoolVar, bool> valueOf) =>
+        _guards.Where(g => !RelaxedRuleIds.Contains(g.Rule.RuleId) && !valueOf(g.Lit))
+               .Select(g => g.Rule)
+               .ToList();
 
     private int IndexOfDate(DateOnly date) => _dates.IndexOf(date);
 

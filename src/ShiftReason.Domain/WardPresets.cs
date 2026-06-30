@@ -124,10 +124,15 @@ public static class WardPresets
     {
         var staff = GenerateStaff(12, seed: 4242);
 
-        // Force exactly two night-lead holders: Ravi and Nadia.
+        // Force exactly two night-lead holders: Ravi and Nadia. Everyone is
+        // full-time here — the point of this preset is that ONE thing is wrong.
+        // Leave the mixed part-time contracts in and the ward is also short of
+        // hours overall, which buries the certification conflict under a pile of
+        // unrelated contract-hour rules and makes the explanation useless.
         staff = staff.Select((s, i) => s with
         {
             Name = i switch { 0 => "Ravi Perera", 1 => "Nadia Haddad", _ => s.Name },
+            ContractHoursPerWeek = 37.5,
             Skills = i switch
             {
                 0 => new HashSet<string> { Icu, NightLead },
@@ -140,12 +145,16 @@ public static class WardPresets
         var friday = DefaultStart.AddDays(11);   // Fri 13 Mar 2026
         var thursday = friday.AddDays(-1);
 
+        // 6 nurse-shifts a day against 12 full-time nurses (~96 shifts of capacity
+        // over the fortnight, against 84 of demand). Comfortably staffed, so the
+        // ONLY thing that makes this ward impossible is the Friday night
+        // certification.
         var demands = dates.Select(d => d == friday
-            ? Cover(d, "NIGHT", 3, (NightLead, 2))
+            ? Cover(d, "NIGHT", 2, (NightLead, 2))
             : Cover(d, "NIGHT", 2, (NightLead, 1))).ToList();
 
-        demands.AddRange(dates.Select(d => Cover(d, "EARLY", 3)));
-        demands.AddRange(dates.Select(d => Cover(d, "LATE", 3)));
+        demands.AddRange(dates.Select(d => Cover(d, "EARLY", 2)));
+        demands.AddRange(dates.Select(d => Cover(d, "LATE", 2)));
 
         var leave = new List<LeaveRequest> { new(staff[0].Id, friday, LeaveKind.Approved) };
         var pins = new List<PinnedAssignment> { new(staff[1].Id, thursday, "NIGHT") };

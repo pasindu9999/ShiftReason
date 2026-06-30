@@ -26,9 +26,10 @@ public static class RosterSolver
         Scenario scenario,
         double seconds = 30,
         int? seed = null,
+        IReadOnlySet<string>? relaxedRuleIds = null,
         CancellationToken cancellationToken = default)
     {
-        var model = GuardedRosterModel.Build(scenario, SolveMode.Optimize);
+        var model = GuardedRosterModel.Build(scenario, SolveMode.Optimize, relaxedRuleIds);
 
         var solver = new CpSolver
         {
