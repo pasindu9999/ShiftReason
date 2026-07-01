@@ -15,7 +15,7 @@ public class RosterModelTests
     {
         var scenario = WardPresets.BalancedWard();
 
-        var outcome = RosterSolver.Solve(scenario, seconds: 30);
+        var outcome = RosterSolver.Solve(scenario, seconds: 10);
 
         Assert.True(outcome.IsFeasible, $"expected a feasible roster, got {outcome.Status}");
         Assert.NotNull(outcome.Roster);
@@ -31,7 +31,7 @@ public class RosterModelTests
     {
         var scenario = WardPresets.BalancedWard();
 
-        var outcome = RosterSolver.Solve(scenario, seconds: 30);
+        var outcome = RosterSolver.Solve(scenario, seconds: 10);
         Assert.NotNull(outcome.Roster);
 
         var expected = scenario.Employees.Count * scenario.HorizonDays;
@@ -56,7 +56,7 @@ public class RosterModelTests
     {
         var scenario = WardPresets.ById(presetId);
 
-        var outcome = RosterSolver.Solve(scenario, seconds: 30);
+        var outcome = RosterSolver.Solve(scenario, seconds: 10);
 
         Assert.True(outcome.IsInfeasible,
             $"preset '{presetId}' was supposed to be infeasible but came back {outcome.Status}");

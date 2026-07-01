@@ -8,7 +8,8 @@ public sealed record SolveOutcome(
     Roster? Roster,
     double? Objective,
     double? BestBound,
-    double WallSeconds)
+    double WallSeconds,
+    PenaltyBreakdown Penalties)
 {
     public bool IsFeasible => Status is CpSolverStatus.Optimal or CpSolverStatus.Feasible;
     public bool IsInfeasible => Status is CpSolverStatus.Infeasible;
@@ -44,12 +45,19 @@ public static class RosterSolver
             ? model.ExtractRoster(solver.BooleanValue)
             : null;
 
+        // A feasible roster still owes the user an explanation of what it cost,
+        // so the objective is reported term by term rather than as one number.
+        var penalties = roster is null
+            ? PenaltyBreakdown.Empty
+            : model.Objective.Read(solver.Value);
+
         return new SolveOutcome(
             status,
             roster,
             roster is null ? null : solver.ObjectiveValue,
             roster is null ? null : solver.BestObjectiveBound,
-            solver.WallTime());
+            solver.WallTime(),
+            penalties);
     }
 
     /// <summary>

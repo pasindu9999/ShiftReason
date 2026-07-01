@@ -24,11 +24,13 @@ public static class WardPresets
         new(3, "NIGHT", "Night", new TimeOnly(23, 0), new TimeOnly(7, 0), 8, true),
     ];
 
-    public static IReadOnlyList<string> Ids { get; } = ["balanced-ward", "flu-season", "night-crunch"];
+    public static IReadOnlyList<string> Ids { get; } =
+        ["balanced-ward", "large-ward", "flu-season", "night-crunch"];
 
     public static Scenario ById(string id) => id switch
     {
         "balanced-ward" => BalancedWard(),
+        "large-ward" => LargeWard(),
         "flu-season" => FluSeason(),
         "night-crunch" => NightCertificationCrunch(),
         _ => throw new KeyNotFoundException($"No preset '{id}'."),
@@ -42,21 +44,39 @@ public static class WardPresets
     /// solves in milliseconds, which leaves the live-streaming grid with nothing
     /// to show — the demo has to be a real optimisation problem to look like one.
     /// </remarks>
-    public static Scenario BalancedWard()
+    public static Scenario BalancedWard() => Ward(44, "balanced-ward", "Balanced ward");
+
+    /// <summary>
+    /// The same ward, scaled up until the search stays busy for the whole window.
+    /// </summary>
+    /// <remarks>
+    /// At 44 nurses CP-SAT finds all of its improving solutions inside the first
+    /// five seconds and then goes quiet for the rest of the run — the live grid
+    /// animates briefly and then appears frozen, which reads as a hung demo. More
+    /// nurses means more fairness slack for LNS to keep chewing on, so the
+    /// improvements spread across the solve instead of front-loading.
+    /// </remarks>
+    public static Scenario LargeWard() => Ward(72, "large-ward", "Large ward (live demo)");
+
+    private static Scenario Ward(int nurses, string id, string name)
     {
-        var staff = GenerateStaff(44, seed: 20260302);
+        var staff = GenerateStaff(nurses, seed: 20260302);
         var dates = Dates(DefaultStart, 28);
 
-        // 19 nurse-shifts a day against ~151 shifts of weekly contract capacity:
-        // about 88% utilisation. Tight enough that CP-SAT has to work for a good
-        // roster, with enough slack that one exists. Demand above ~21/day makes
-        // the ward infeasible outright — contract hours, not headcount, are the
-        // binding constraint here.
+        // Demand scales with headcount so utilisation stays near 88% at any size.
+        var scale = nurses / 44.0;
+        int S(int baseline) => Math.Max(1, (int)Math.Round(baseline * scale));
+
+        // At 44 nurses this is 19 nurse-shifts a day against ~151 shifts of
+        // weekly contract capacity — about 88% utilisation. Tight enough that
+        // CP-SAT has to work for a good roster, loose enough that one exists.
+        // Push past ~21/day at that size and the ward is infeasible outright:
+        // contract hours, not headcount, are the binding constraint here.
         var demands = dates.SelectMany(d => new[]
         {
-            Cover(d, "EARLY", 8, (Icu, 2), (Paediatric, 1)),
-            Cover(d, "LATE", 7, (Icu, 2)),
-            Cover(d, "NIGHT", 4, (Icu, 1), (NightLead, 1)),
+            Cover(d, "EARLY", S(8), (Icu, S(2)), (Paediatric, S(1))),
+            Cover(d, "LATE", S(7), (Icu, S(2))),
+            Cover(d, "NIGHT", S(4), (Icu, S(1)), (NightLead, S(1))),
         }).ToList();
 
         var leave = new List<LeaveRequest>
@@ -67,7 +87,7 @@ public static class WardPresets
         };
 
         return new Scenario(
-            "balanced-ward", "Balanced ward",
+            id, name,
             DefaultStart, 28,
             staff, Shifts, demands, leave, [], RuleSettings.Default);
     }

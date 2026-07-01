@@ -86,6 +86,17 @@ public sealed class GuardedRosterModel
     /// </remarks>
     public IReadOnlySet<string> RelaxedRuleIds { get; }
 
+    /// <summary>
+    /// The soft terms, populated only in <see cref="SolveMode.Optimize"/>.
+    /// </summary>
+    /// <remarks>
+    /// Explain mode must never carry an objective: CP-SAT silently degrades the
+    /// infeasibility core to "every assumption" when one is present, with no
+    /// status code to detect it. Relax mode has an objective of its own — the
+    /// relaxation cost — so the soft terms would fight it.
+    /// </remarks>
+    public RosterObjective Objective { get; private set; } = RosterObjective.None;
+
     public static GuardedRosterModel Build(
         Scenario scenario,
         SolveMode mode,
@@ -376,6 +387,9 @@ public sealed class GuardedRosterModel
                 // Guards pinned on: the model behaves as if every rule were a
                 // plain hard constraint.
                 foreach (var (lit, _) in live) Model.Add(lit == 1);
+
+                Objective = RosterObjective.Build(Model, Scenario, X, _shifts, _dates, _offIndex);
+                if (!Objective.IsEmpty) Model.Minimize(Objective.Total);
                 break;
 
             case SolveMode.Explain:
