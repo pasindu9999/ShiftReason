@@ -62,6 +62,13 @@ public sealed class GuardedRosterModel
     /// <summary>x[employee, day, shift]. Shift index 0 is OFF.</summary>
     public BoolVar[,,] X { get; }
 
+    public int EmployeeCount => Scenario.Employees.Count;
+    public int DayCount => _dates.Count;
+    public int ShiftCount => _shifts.Count;
+
+    public IReadOnlyList<DateOnly> Dates => _dates;
+    public IReadOnlyList<ShiftType> Shifts => _shifts;
+
     public IReadOnlyList<(BoolVar Lit, RuleRef Rule)> Guards => _guards;
 
     /// <summary>
@@ -425,6 +432,58 @@ public sealed class GuardedRosterModel
     // ------------------------------------------------------------------
     // Reading a solution back
     // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Reads the grid into a caller-owned buffer as <c>[employee * DayCount + day] =&gt; shift index</c>.
+    /// </summary>
+    /// <remarks>
+    /// Called from inside the CP-SAT solution callback, which runs while the solver
+    /// holds its global mutex — every worker is blocked until this returns. Hence
+    /// the reused buffer and the early <c>break</c>: no allocation, no LINQ, and one
+    /// interop call per cell at most.
+    /// </remarks>
+    public void ExtractCells(Func<BoolVar, bool> valueOf, int[] into)
+    {
+        if (into.Length < EmployeeCount * DayCount)
+        {
+            throw new ArgumentException(
+                $"Buffer of {into.Length} is too small for {EmployeeCount}x{DayCount} cells.", nameof(into));
+        }
+
+        var k = 0;
+        for (var e = 0; e < EmployeeCount; e++)
+        {
+            for (var d = 0; d < DayCount; d++)
+            {
+                var assigned = 0;
+                for (var s = 1; s < ShiftCount; s++)
+                {
+                    if (!valueOf(X[e, d, s])) continue;
+                    assigned = s;
+                    break;
+                }
+
+                into[k++] = assigned;
+            }
+        }
+    }
+
+    /// <summary>Turns a flat cell buffer back into a <see cref="Roster"/>.</summary>
+    public Roster RosterFromCells(ReadOnlySpan<int> cells)
+    {
+        var assignments = new List<Assignment>(EmployeeCount * DayCount);
+
+        for (var e = 0; e < EmployeeCount; e++)
+        {
+            for (var d = 0; d < DayCount; d++)
+            {
+                var shift = _shifts[cells[e * DayCount + d]];
+                assignments.Add(new Assignment(Scenario.Employees[e].Id, _dates[d], shift.Id));
+            }
+        }
+
+        return new Roster(assignments);
+    }
 
     /// <summary>
     /// Turns solver output into a <see cref="Roster"/>.

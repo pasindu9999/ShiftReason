@@ -1,4 +1,6 @@
+using System.Threading.Channels;
 using Google.OrTools.Sat;
+using Google.Protobuf;
 using ShiftReason.Domain;
 
 namespace ShiftReason.Solver;
@@ -15,8 +17,81 @@ public sealed record SolveOutcome(
     public bool IsInfeasible => Status is CpSolverStatus.Infeasible;
 }
 
+/// <summary>Outcome of a streamed solve, plus what was streamed.</summary>
+public sealed record StreamingSolveResult(
+    SolveOutcome Outcome,
+    RosterSnapshot? Final,
+    int SolutionCount,
+    bool WasCancelled,
+    byte[] ModelProto);
+
 public static class RosterSolver
 {
+    /// <summary>
+    /// Solves while publishing improving solutions to <paramref name="frames"/>.
+    /// </summary>
+    /// <remarks>
+    /// Blocking and CPU-bound by design — the caller is a background worker, never
+    /// a request thread. Cancellation is <em>not</em> an error here: stopping early
+    /// is a normal outcome and the best roster found so far is returned, which is
+    /// the whole point of a Stop button.
+    /// </remarks>
+    public static StreamingSolveResult SolveStreaming(
+        Scenario scenario,
+        ChannelWriter<RosterSnapshot> frames,
+        double seconds = 30,
+        int? seed = null,
+        IReadOnlySet<string>? relaxedRuleIds = null,
+        TimeSpan? minInterval = null,
+        CancellationToken cancellationToken = default)
+    {
+        var model = GuardedRosterModel.Build(scenario, SolveMode.Optimize, relaxedRuleIds);
+
+        var solver = new CpSolver
+        {
+            StringParameters = seed is { } s
+                ? SolverParameters.Reproducible(s, deterministicTime: seconds)
+                : SolverParameters.Fast(seconds),
+        };
+
+        var callback = new StreamingCallback(
+            model, frames, minInterval ?? TimeSpan.FromMilliseconds(200), cancellationToken);
+
+        CpSolverStatus status;
+        using (cancellationToken.Register(static state => ((CpSolver)state!).StopSearch(), solver))
+        {
+            status = solver.Solve(model.Model, callback);
+        }
+
+        // The callback swallowed anything it threw so the exception would not
+        // unwind through C++. Surface it now, on a managed thread.
+        if (callback.Fault is { } fault)
+        {
+            throw new InvalidOperationException("The solution callback failed mid-solve.", fault);
+        }
+
+        var feasible = status is CpSolverStatus.Optimal or CpSolverStatus.Feasible;
+        var roster = feasible ? model.ExtractRoster(solver.BooleanValue) : null;
+
+        var outcome = new SolveOutcome(
+            status,
+            roster,
+            feasible ? solver.ObjectiveValue : null,
+            feasible ? solver.BestObjectiveBound : null,
+            solver.WallTime(),
+            feasible ? model.Objective.Read(solver.Value) : PenaltyBreakdown.Empty);
+
+        return new StreamingSolveResult(
+            outcome,
+            callback.Latest,
+            callback.SolutionCount,
+            cancellationToken.IsCancellationRequested,
+            // Stored with the run: the scenario hash is not enough, because one
+            // reordered dictionary in the builder changes the search and the answer
+            // while leaving the hash identical.
+            model.Model.Model.ToByteArray());
+    }
+
     /// <summary>Produces a roster, or reports that no roster exists.</summary>
     /// <param name="seed">
     /// Supply a seed to get a reproducible solve. Reproducibility costs real

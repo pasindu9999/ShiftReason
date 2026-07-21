@@ -5,6 +5,7 @@
     <Project Path="src/ShiftReason.Solver/ShiftReason.Solver.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/ShiftReason.Api.Tests/ShiftReason.Api.Tests.csproj" />
     <Project Path="tests/ShiftReason.Solver.Tests/ShiftReason.Solver.Tests.csproj" />
   </Folder>
 </Solution>
