@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace ShiftReason.Api.Persistence;
 
@@ -65,9 +66,22 @@ public sealed class RunStore(DbContextOptions<RunStore> options) : DbContext(opt
 
     protected override void OnModelCreating(ModelBuilder b)
     {
+        // SQLite has no native DateTimeOffset, and EF refuses to translate one in
+        // an ORDER BY. Storing ticks keeps "most recent runs first" as a real SQL
+        // sort instead of pulling every row into memory to order it.
+        var toTicks = new ValueConverter<DateTimeOffset, long>(
+            v => v.UtcTicks,
+            v => new DateTimeOffset(v, TimeSpan.Zero));
+
+        var toNullableTicks = new ValueConverter<DateTimeOffset?, long?>(
+            v => v.HasValue ? v.Value.UtcTicks : null,
+            v => v.HasValue ? new DateTimeOffset(v.Value, TimeSpan.Zero) : null);
+
         b.Entity<SolveRun>(e =>
         {
             e.HasKey(r => r.Id);
+            e.Property(r => r.CreatedUtc).HasConversion(toTicks);
+            e.Property(r => r.CompletedUtc).HasConversion(toNullableTicks);
             e.HasIndex(r => r.CreatedUtc);
             e.HasIndex(r => r.ParentRunId);
         });

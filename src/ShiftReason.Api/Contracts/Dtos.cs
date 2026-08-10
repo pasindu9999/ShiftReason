@@ -69,7 +69,8 @@ public sealed record ExplanationDto(
     int Probes,
     double Seconds,
     bool Minimised,
-    bool StructurallyInfeasible);
+    bool StructurallyInfeasible,
+    bool TimedOut);
 
 public sealed record RunFailed(string RunId, string Message);
 
@@ -86,6 +87,23 @@ public sealed record SolveRequest(
 
 public sealed record SolveAccepted(string RunId, string PresetId);
 
+/// <summary>
+/// The grid's shape, independent of any run.
+/// </summary>
+/// <remarks>
+/// A client cannot join a run's SignalR group until the enqueue call has returned
+/// its id, so it can legitimately miss the <see cref="RunStarted"/> broadcast. This
+/// lets the grid be laid out before a solve is even requested, which makes that
+/// race harmless instead of fatal.
+/// </remarks>
+public sealed record ScenarioLayout(
+    string ScenarioId,
+    string ScenarioName,
+    string[] EmployeeIds,
+    string[] EmployeeNames,
+    string[] Dates,
+    ShiftDto[] Shifts);
+
 public sealed record PresetSummary(
     string Id,
     string Name,
@@ -93,3 +111,21 @@ public sealed record PresetSummary(
     int Days,
     int Shifts,
     int Variables);
+
+/// <summary>
+/// A whole run, replayable without a backend.
+/// </summary>
+/// <remarks>
+/// Deliberately the exact sequence of hub messages a live run emits — start,
+/// frames, completion, explanation — so the published demo drives the same client
+/// reducer as a live solve rather than being a separate, fakeable rendering path.
+/// A recruiter opening the link sees real solver output whether or not anything
+/// is awake to serve it.
+/// </remarks>
+public sealed record RecordedTrace(
+    string Id,
+    string Label,
+    RunStarted Started,
+    RosterDelta[] Frames,
+    RunCompleted Completed,
+    ExplanationDto? Explanation);

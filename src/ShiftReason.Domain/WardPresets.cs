@@ -95,37 +95,60 @@ public static class WardPresets
     /// <summary>
     /// Infeasible: demand rises just as the people who could meet it go off sick.
     /// </summary>
+    /// <remarks>
+    /// Deliberately small and sharp. The first version of this preset was a
+    /// 44-nurse ward with a week-long surge, and although the optimising solve
+    /// rejected it in under a second, the explanation could not <em>prove</em> it
+    /// infeasible inside 45 seconds — assumptions force CP-SAT to a single worker
+    /// and weaken presolve, which makes proving UNSAT far harder than finding it.
+    /// A ward that cannot say why it is impossible is no use as a demonstration of
+    /// saying why things are impossible, so the conflict is now a specific,
+    /// checkable one: a three-day surge needs four ICU-certified nurses on the
+    /// early shift, only five hold the certificate, and two of them are signed off.
+    /// </remarks>
     public static Scenario FluSeason()
     {
-        var staff = GenerateStaff(44, seed: 20260302);
-        var dates = Dates(DefaultStart, 28);
+        var staff = GenerateStaff(18, seed: 90210);
 
-        // Surge week: everything needs more bodies than the ward can field.
-        var surge = dates.Skip(7).Take(7).ToHashSet();
+        // Exactly five ICU holders, everyone full-time, so the only thing that
+        // breaks the ward is the certificate shortage during the surge.
+        var icuHolders = new[] { 0, 1, 2, 3, 4 };
+        staff = staff.Select((s, i) => s with
+        {
+            ContractHoursPerWeek = 37.5,
+            Skills = icuHolders.Contains(i)
+                ? new HashSet<string> { Icu, Paediatric }
+                : s.Skills.Where(sk => sk != Icu).ToHashSet(),
+        }).ToList();
+
+        var dates = Dates(DefaultStart, 14);
+        var surge = new[] { DefaultStart.AddDays(9), DefaultStart.AddDays(10), DefaultStart.AddDays(11) };
 
         var demands = dates.SelectMany(d => surge.Contains(d)
             ? new[]
             {
-                Cover(d, "EARLY", 14, (Icu, 4), (Paediatric, 2)),
-                Cover(d, "LATE", 13, (Icu, 4)),
-                Cover(d, "NIGHT", 9, (Icu, 3), (NightLead, 1)),
+                Cover(d, "EARLY", 5, (Icu, 4)),
+                Cover(d, "LATE", 3, (Icu, 1)),
+                Cover(d, "NIGHT", 2),
             }
             : new[]
             {
-                Cover(d, "EARLY", 8, (Icu, 2), (Paediatric, 1)),
-                Cover(d, "LATE", 7, (Icu, 2)),
-                Cover(d, "NIGHT", 4, (Icu, 1), (NightLead, 1)),
+                Cover(d, "EARLY", 3, (Icu, 1)),
+                Cover(d, "LATE", 3),
+                Cover(d, "NIGHT", 2),
             }).ToList();
 
-        // ...and three of the ICU-certified nurses are signed off that same week.
-        var icuStaff = staff.Where(s => s.Holds(Icu)).Take(3).ToList();
-        var leave = icuStaff
+        // Two of the five signed off for the whole surge. Three ICU nurses remain
+        // against a requirement of four, so no roster exists — and dropping either
+        // one of the two absences on its own is enough to fix it, which is what
+        // makes the conflict set minimal at three rules.
+        var leave = new[] { staff[0], staff[1] }
             .SelectMany(s => surge.Select(d => new LeaveRequest(s.Id, d, LeaveKind.Approved)))
             .ToList();
 
         return new Scenario(
             "flu-season", "Flu season surge",
-            DefaultStart, 28,
+            DefaultStart, 14,
             staff, Shifts, demands, leave, [], RuleSettings.Default);
     }
 

@@ -1,0 +1,289 @@
+{
+  "id": "night-crunch",
+  "label": "Night certification crunch — impossible, explained",
+  "started": {
+    "runId": "e6e6e8390d98",
+    "scenarioId": "night-crunch",
+    "scenarioName": "Night certification crunch",
+    "employeeIds": [
+      "n00",
+      "n01",
+      "n02",
+      "n03",
+      "n04",
+      "n05",
+      "n06",
+      "n07",
+      "n08",
+      "n09",
+      "n10",
+      "n11"
+    ],
+    "employeeNames": [
+      "Ravi Perera",
+      "Nadia Haddad",
+      "Mei Perera",
+      "Tomas Costa",
+      "Aisha Volkov",
+      "Liam Sharma",
+      "Priya Farouk",
+      "Jonas Okafor",
+      "Ines Tanaka",
+      "Kwame Lin",
+      "Sofia Mensah",
+      "Haruto Haddad"
+    ],
+    "dates": [
+      "2026-03-02",
+      "2026-03-03",
+      "2026-03-04",
+      "2026-03-05",
+      "2026-03-06",
+      "2026-03-07",
+      "2026-03-08",
+      "2026-03-09",
+      "2026-03-10",
+      "2026-03-11",
+      "2026-03-12",
+      "2026-03-13",
+      "2026-03-14",
+      "2026-03-15"
+    ],
+    "shifts": [
+      {
+        "index": 0,
+        "id": "OFF",
+        "name": "Off",
+        "isNight": false
+      },
+      {
+        "index": 1,
+        "id": "EARLY",
+        "name": "Early",
+        "isNight": false
+      },
+      {
+        "index": 2,
+        "id": "LATE",
+        "name": "Late",
+        "isNight": false
+      },
+      {
+        "index": 3,
+        "id": "NIGHT",
+        "name": "Night",
+        "isNight": true
+      }
+    ],
+    "relaxedRuleIds": []
+  },
+  "frames": [],
+  "completed": {
+    "runId": "e6e6e8390d98",
+    "status": "Infeasible",
+    "objective": null,
+    "bestBound": null,
+    "wallSeconds": 0.0044443,
+    "solutionCount": 0,
+    "cancelled": false,
+    "penalties": []
+  },
+  "explanation": {
+    "runId": "e6e6e8390d98",
+    "conflictSet": [
+      {
+        "ruleId": "skill:2026-03-13:NIGHT:NightLead",
+        "kind": "SkillMinimum",
+        "relaxCost": 120,
+        "sentence": "Fri 13 Mar Night needs 2 nurses certified in NightLead (only 2 on the ward hold it).",
+        "refs": [
+          {
+            "kind": "date",
+            "id": "2026-03-13"
+          },
+          {
+            "kind": "shift",
+            "id": "NIGHT"
+          },
+          {
+            "kind": "skill",
+            "id": "NightLead"
+          }
+        ]
+      },
+      {
+        "ruleId": "leave:n00:2026-03-13",
+        "kind": "ApprovedLeave",
+        "relaxCost": 60,
+        "sentence": "Ravi Perera has approved leave on Fri 13 Mar.",
+        "refs": [
+          {
+            "kind": "employee",
+            "id": "n00"
+          },
+          {
+            "kind": "date",
+            "id": "2026-03-13"
+          }
+        ]
+      }
+    ],
+    "fixes": [
+      {
+        "rank": 1,
+        "totalCost": 120,
+        "rules": [
+          {
+            "ruleId": "skill:2026-03-13:NIGHT:NightLead",
+            "kind": "SkillMinimum",
+            "relaxCost": 120,
+            "sentence": "Fri 13 Mar Night needs 2 nurses certified in NightLead (only 2 on the ward hold it).",
+            "refs": [
+              {
+                "kind": "date",
+                "id": "2026-03-13"
+              },
+              {
+                "kind": "shift",
+                "id": "NIGHT"
+              },
+              {
+                "kind": "skill",
+                "id": "NightLead"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "rank": 2,
+        "totalCost": 240,
+        "rules": [
+          {
+            "ruleId": "leave:n00:2026-03-13",
+            "kind": "ApprovedLeave",
+            "relaxCost": 60,
+            "sentence": "Ravi Perera has approved leave on Fri 13 Mar.",
+            "refs": [
+              {
+                "kind": "employee",
+                "id": "n00"
+              },
+              {
+                "kind": "date",
+                "id": "2026-03-13"
+              }
+            ]
+          },
+          {
+            "ruleId": "minrest:n01:2026-03-12",
+            "kind": "MinRest",
+            "relaxCost": 90,
+            "sentence": "Nadia Haddad must rest on Fri 13 Mar after a night shift on Thu 12 Mar.",
+            "refs": [
+              {
+                "kind": "employee",
+                "id": "n01"
+              },
+              {
+                "kind": "date",
+                "id": "2026-03-12"
+              },
+              {
+                "kind": "date",
+                "id": "2026-03-13"
+              }
+            ]
+          },
+          {
+            "ruleId": "minrest:n01:2026-03-13",
+            "kind": "MinRest",
+            "relaxCost": 90,
+            "sentence": "Nadia Haddad must rest on Sat 14 Mar after a night shift on Fri 13 Mar.",
+            "refs": [
+              {
+                "kind": "employee",
+                "id": "n01"
+              },
+              {
+                "kind": "date",
+                "id": "2026-03-13"
+              },
+              {
+                "kind": "date",
+                "id": "2026-03-14"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "rank": 3,
+        "totalCost": 240,
+        "rules": [
+          {
+            "ruleId": "leave:n00:2026-03-13",
+            "kind": "ApprovedLeave",
+            "relaxCost": 60,
+            "sentence": "Ravi Perera has approved leave on Fri 13 Mar.",
+            "refs": [
+              {
+                "kind": "employee",
+                "id": "n00"
+              },
+              {
+                "kind": "date",
+                "id": "2026-03-13"
+              }
+            ]
+          },
+          {
+            "ruleId": "minrest:n00:2026-03-13",
+            "kind": "MinRest",
+            "relaxCost": 90,
+            "sentence": "Ravi Perera must rest on Sat 14 Mar after a night shift on Fri 13 Mar.",
+            "refs": [
+              {
+                "kind": "employee",
+                "id": "n00"
+              },
+              {
+                "kind": "date",
+                "id": "2026-03-13"
+              },
+              {
+                "kind": "date",
+                "id": "2026-03-14"
+              }
+            ]
+          },
+          {
+            "ruleId": "minrest:n01:2026-03-12",
+            "kind": "MinRest",
+            "relaxCost": 90,
+            "sentence": "Nadia Haddad must rest on Fri 13 Mar after a night shift on Thu 12 Mar.",
+            "refs": [
+              {
+                "kind": "employee",
+                "id": "n01"
+              },
+              {
+                "kind": "date",
+                "id": "2026-03-12"
+              },
+              {
+                "kind": "date",
+                "id": "2026-03-13"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "probes": 4,
+    "seconds": 0.58975,
+    "minimised": true,
+    "structurallyInfeasible": false,
+    "timedOut": false
+  }
+}

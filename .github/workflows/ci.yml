@@ -30,6 +30,29 @@ jobs:
       - name: Test
         run: dotnet test ShiftReason.slnx -c Release --no-build --logger "console;verbosity=normal"
 
+  web:
+    name: Frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/ShiftReason.Web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: src/ShiftReason.Web/package-lock.json
+
+      - run: npm ci
+
+      # Replays the committed demo traces through the real reducer. This is what
+      # catches the published demo drifting from what the solver actually does.
+      - run: npm test
+
+      - run: npm run build
+
   # The dev machine has no WSL, so Linux containers cannot run there. This job is
   # the only place the glibc / RID / native-load path is proven before deploy.
   container-check:

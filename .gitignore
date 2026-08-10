@@ -14,6 +14,10 @@ TestResults/
 # Node
 node_modules/
 dist/
+
+# Frontend build output. `npm --prefix src/ShiftReason.Web run build` writes the
+# SPA straight into the API's wwwroot; it is generated, so it is not committed.
+src/ShiftReason.Api/wwwroot/
 .vite/
 *.tsbuildinfo
 npm-debug.log*

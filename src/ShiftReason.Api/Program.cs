@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using ShiftReason.Api.Contracts;
 using ShiftReason.Api.Persistence;
@@ -57,6 +58,21 @@ app.MapGet("/api/presets", () => WardPresets.Ids.Select(id =>
         s.ShiftTypes.Count - 1, // excluding OFF
         s.Employees.Count * s.HorizonDays * s.ShiftTypes.Count);
 }));
+
+app.MapGet("/api/scenarios/{presetId}", (string presetId) =>
+{
+    if (!WardPresets.Ids.Contains(presetId)) return Results.NotFound();
+
+    var s = WardPresets.ById(presetId);
+    return Results.Ok(new ScenarioLayout(
+        s.Id,
+        s.Name,
+        s.Employees.Select(e => e.Id).ToArray(),
+        s.Employees.Select(e => e.Name).ToArray(),
+        s.Dates.Select(d => d.ToString("yyyy-MM-dd")).ToArray(),
+        s.ShiftTypes.OrderBy(t => t.Index)
+            .Select(t => new ShiftDto(t.Index, t.Id, t.Name, t.IsNight)).ToArray()));
+});
 
 /// Enqueues a solve. Returns immediately with a run id; results arrive on the hub.
 app.MapPost("/api/solve", (SolveRequest request, SolveQueue queue) =>
@@ -120,6 +136,55 @@ app.MapGet("/api/runs/{runId}/trace", async (string runId, RunStore db) =>
     return frames.Count == 0 ? Results.NotFound() : Results.Ok(frames);
 });
 
+/// Assembles a run into a self-contained recording for the offline demo.
+app.MapGet("/api/runs/{runId}/recording", async (string runId, RunStore db) =>
+{
+    var run = await db.Runs.AsNoTracking().FirstOrDefaultAsync(r => r.Id == runId);
+    if (run is null) return Results.NotFound();
+
+    var frames = await db.Frames.AsNoTracking()
+        .Where(f => f.RunId == runId)
+        .OrderBy(f => f.Seq)
+        .ToListAsync();
+
+    var scenario = WardPresets.ById(run.ScenarioId);
+    var json = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+
+    var started = new RunStarted(
+        run.Id,
+        scenario.Id,
+        scenario.Name,
+        scenario.Employees.Select(e => e.Id).ToArray(),
+        scenario.Employees.Select(e => e.Name).ToArray(),
+        scenario.Dates.Select(d => d.ToString("yyyy-MM-dd")).ToArray(),
+        scenario.ShiftTypes.OrderBy(t => t.Index)
+            .Select(t => new ShiftDto(t.Index, t.Id, t.Name, t.IsNight)).ToArray(),
+        run.RelaxedRuleIds.Split(',', StringSplitOptions.RemoveEmptyEntries));
+
+    var deltas = frames.Select(f =>
+    {
+        var body = JsonSerializer.Deserialize<FrameBody>(f.ChangesJson, json)!;
+        return new RosterDelta(
+            run.Id, f.Seq, f.Seconds, f.Objective, f.BestBound,
+            body.IsFull, body.Changes, body.Penalties);
+    }).ToArray();
+
+    var penalties = run.PenaltiesJson is null
+        ? []
+        : JsonSerializer.Deserialize<PenaltyLineDto[]>(run.PenaltiesJson, json) ?? [];
+
+    var completed = new RunCompleted(
+        run.Id, run.Status, run.Objective, run.BestBound,
+        run.WallSeconds, run.SolutionCount, run.Status == "Cancelled", penalties);
+
+    var explanation = run.ExplanationJson is null
+        ? null
+        : JsonSerializer.Deserialize<ExplanationDto>(run.ExplanationJson, json);
+
+    return Results.Ok(new RecordedTrace(
+        run.Id, $"{run.ScenarioName}", started, deltas, completed, explanation));
+});
+
 // SPA fallback: any unmatched non-API path serves the React shell.
 app.MapFallbackToFile("index.html");
 
@@ -138,6 +203,9 @@ static async Task InitialiseDatabaseAsync(WebApplication app)
     await db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;");
     await db.Database.ExecuteSqlRawAsync("PRAGMA busy_timeout=5000;");
 }
+
+/// <summary>Shape of the JSON blob a persisted frame stores.</summary>
+internal sealed record FrameBody(bool IsFull, CellChange[] Changes, PenaltyLineDto[] Penalties);
 
 /// <summary>Exposed so the integration tests can spin the real app up.</summary>
 public partial class Program;

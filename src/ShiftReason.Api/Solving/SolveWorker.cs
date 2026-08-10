@@ -163,7 +163,17 @@ public sealed class SolveWorker(
 
         if (result.Outcome.IsInfeasible && job.ExplainIfInfeasible)
         {
-            await ExplainAsync(job, scenario, cancellation);
+            // Isolated on purpose. The run already has its verdict and it is
+            // recorded; a failure while working out *why* must never downgrade a
+            // correct "Infeasible" to "Failed".
+            try
+            {
+                await ExplainAsync(job, scenario, cancellation);
+            }
+            catch (Exception ex)
+            {
+                log.LogError(ex, "Explanation failed for {RunId}; the run result stands", job.RunId);
+            }
         }
     }
 
@@ -193,7 +203,8 @@ public sealed class SolveWorker(
                 explanation.ProbeCount,
                 explanation.WallSeconds,
                 explanation.CoreWasMinimised,
-                explanation.IsStructurallyInfeasible);
+                explanation.IsStructurallyInfeasible,
+                explanation.TimedOut);
 
             await Persist(job.RunId, [], run => run.ExplanationJson = JsonSerializer.Serialize(dto, Json));
             await SafeSend(job.RunId, "explained", dto);
@@ -207,7 +218,6 @@ public sealed class SolveWorker(
         {
             // Worth shouting about: it means the core is meaningless, not missing.
             log.LogError(ex, "Conflict core degraded for {RunId}", job.RunId);
-            await SafeSend(job.RunId, "runFailed", new RunFailed(job.RunId, ex.Message));
         }
     }
 

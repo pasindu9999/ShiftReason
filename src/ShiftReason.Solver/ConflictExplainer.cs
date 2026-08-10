@@ -9,10 +9,17 @@ public sealed record Explanation(
     IReadOnlyList<RelaxationOption> Fixes,
     int ProbeCount,
     double WallSeconds,
-    bool CoreWasMinimised)
+    bool CoreWasMinimised,
+    bool TimedOut = false)
 {
-    /// <summary>True when no combination of policy rules can rescue the scenario.</summary>
-    public bool IsStructurallyInfeasible => ConflictSet.Count == 0;
+    /// <summary>
+    /// True when no combination of policy rules can rescue the scenario.
+    /// </summary>
+    /// <remarks>
+    /// Only meaningful when the analysis actually finished — an empty conflict set
+    /// after a timeout means "we did not find out", not "nothing can help".
+    /// </remarks>
+    public bool IsStructurallyInfeasible => !TimedOut && ConflictSet.Count == 0;
 }
 
 /// <summary>One way to make the scenario solvable, priced.</summary>
@@ -43,7 +50,7 @@ public sealed class DegradedCoreException(string message) : Exception(message);
 /// </remarks>
 public static class ConflictExplainer
 {
-    private const double CoreSolveSeconds = 15;
+    private const double CoreSolveSeconds = 45;
     private const double ProbeSeconds = 6;
     private const int FixpointRounds = 3;
     private const int DefaultFixCount = 3;
@@ -61,6 +68,17 @@ public static class ConflictExplainer
         // --- Stage 1: the sufficient core --------------------------------
         var (status, core) = SolveForCore(model, CoreSolveSeconds, cancellationToken);
         probes++;
+
+        // UNKNOWN is a budget problem, not a contradiction. Proving infeasibility
+        // under assumptions is far harder than finding it: CP-SAT is forced to a
+        // single worker and has presolve weakened, so a large ward the optimising
+        // solve rejected in a second can still be unproven here. Report that
+        // honestly rather than failing the run that already has its answer.
+        if (status is CpSolverStatus.Unknown)
+        {
+            return new Explanation([], [], probes, started.Elapsed.TotalSeconds,
+                CoreWasMinimised: false, TimedOut: true);
+        }
 
         if (status is not CpSolverStatus.Infeasible)
         {
