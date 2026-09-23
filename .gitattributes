@@ -1,0 +1,13 @@
+# Normalise text to LF in the repository.
+* text=auto
+
+# Executed by bash on Linux (CI runners, containers, Cloud Shell). A CRLF checkout
+# on Windows turns every line ending into a literal \r and the script dies with
+# "$'\r': command not found", so these stay LF on every platform.
+*.sh        text eol=lf
+Dockerfile  text eol=lf
+
+# Binary — never touch.
+*.png       binary
+*.jpg       binary
+*.ico       binary

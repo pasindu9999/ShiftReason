@@ -78,6 +78,8 @@ export type RunAction =
   | { type: 'completed'; payload: RunCompleted }
   | { type: 'explained'; payload: ExplanationDto }
   | { type: 'failed'; payload: RunFailed }
+  /** A replay halted by the user. Live runs learn this from the server instead. */
+  | { type: 'stopped' }
 
 /**
  * The single place roster state changes.
@@ -171,6 +173,14 @@ export function runReducer(state: RunState, action: RunAction): RunState {
 
     case 'failed':
       return { ...state, status: 'failed', error: action.payload.message }
+
+    case 'stopped':
+      // Without this a halted replay stays "running" forever, and since every
+      // control is disabled while a run is in flight, one press of Stop would
+      // lock the whole demo.
+      return isRunning(state.status)
+        ? { ...state, status: 'cancelled', cancelled: true, changed: new Set() }
+        : state
 
     default:
       return state

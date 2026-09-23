@@ -1,4 +1,14 @@
-name: CI
+name: CI/CD
+
+# Every push and pull request is built and tested. Pushes to main additionally
+# publish the container image, and deploy it once the Azure and Cloudflare
+# settings exist (see docs/DEPLOYMENT.md). Until they do, the deploy jobs are
+# skipped rather than failed, so the pipeline is green from the first push.
+#
+#   dotnet ─┐
+#           ├─> image (build, smoke test, publish) ──> deploy-app  (Azure Container Apps)
+#   web ────┤
+#           └────────────────────────────────────────> deploy-demo (Cloudflare Pages)
 
 on:
   push:
@@ -6,68 +16,223 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+# A newer push to a pull request supersedes its older run. Runs on main always
+# finish, so a deployment is never cut off halfway.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  build-and-test:
-    name: Build and test
-    runs-on: ubuntu-latest
+  dotnet:
+    name: .NET build and test
+    # Pinned rather than ubuntu-latest, which moves to Ubuntu 26 in October 2026.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '10.0.x'
+          global-json-file: global.json
 
-      # Restores for linux-x64 explicitly. Google.OrTools depends on all five
-      # runtime packages unconditionally, and pinning the RID is what keeps the
-      # published output (and later the image) from carrying four unused copies
-      # of the native solver.
       - name: Restore
-        run: dotnet restore ShiftReason.slnx -r linux-x64
+        run: dotnet restore ShiftReason.slnx
 
       - name: Build
-        run: dotnet build ShiftReason.slnx -c Release --no-restore
+        run: dotnet build ShiftReason.slnx --configuration Release --no-restore
 
+      # The solver suites run real CP-SAT solves against wall-clock budgets. They
+      # need at least two solver workers, which the app guarantees on any runner
+      # with two or more cores (see SolverParameters.Workers).
       - name: Test
-        run: dotnet test ShiftReason.slnx -c Release --no-build --logger "console;verbosity=normal"
+        run: dotnet test ShiftReason.slnx --configuration Release --no-build --logger "console;verbosity=normal"
 
   web:
-    name: Frontend
-    runs-on: ubuntu-latest
+    name: Frontend test and build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: src/ShiftReason.Web
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: '24'
+          node-version-file: src/ShiftReason.Web/.node-version
           cache: npm
           cache-dependency-path: src/ShiftReason.Web/package-lock.json
 
       - run: npm ci
 
-      # Replays the committed demo traces through the real reducer. This is what
-      # catches the published demo drifting from what the solver actually does.
-      - run: npm test
+      # Replays every committed demo recording through the real reducer. This is
+      # what catches the published demo drifting from what the solver does.
+      - name: Test
+        run: npm test
 
-      - run: npm run build
+      - name: Build the static demo
+        run: npm run build:demo
+        env:
+          VITE_LIVE_URL: ${{ vars.LIVE_URL }}
+          VITE_REPO_URL: ${{ github.server_url }}/${{ github.repository }}
 
-  # The dev machine has no WSL, so Linux containers cannot run there. This job is
-  # the only place the glibc / RID / native-load path is proven before deploy.
-  container-check:
-    name: OR-Tools native runtime on 10.0-noble
-    runs-on: ubuntu-latest
+      - uses: actions/upload-artifact@v7
+        with:
+          name: static-demo
+          path: src/ShiftReason.Web/dist
+          if-no-files-found: error
+          retention-days: 7
+
+  image:
+    name: Container image
+    needs: [dotnet, web]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.names.outputs.image }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - name: Build spike image
-        run: docker build -f spike/Dockerfile -t shiftreason-spike .
-
-      - name: Run solver checks inside the container
-        run: docker run --rm --cpus=4 shiftreason-spike
-
-      - name: Report published image size
+      - name: Image names
+        id: names
         run: |
-          echo "### Spike image size" >> "$GITHUB_STEP_SUMMARY"
-          docker images shiftreason-spike --format '{{.Size}}' >> "$GITHUB_STEP_SUMMARY"
+          # GHCR requires lower case; GitHub account names need not be.
+          repo="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/shiftreason"
+          echo "repo=${repo}" >> "$GITHUB_OUTPUT"
+          echo "image=${repo}:sha-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v4
+
+      # Includes org.opencontainers.image.source, which is what links the GHCR
+      # package to this repository on its first push.
+      - name: OCI labels
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ steps.names.outputs.repo }}
+
+      - name: Build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: shiftreason:ci
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VITE_REPO_URL=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Deliberately smaller than production: a 2-CPU quota on a 4-core runner
+      # proves the solver sizes itself from the cgroup quota rather than the host,
+      # which is exactly what CP-SAT's own num_workers:0 gets wrong.
+      - name: Smoke test the image
+        run: |
+          docker run --detach --name shiftreason --publish 8080:8080 --cpus=2 shiftreason:ci
+          if ! bash deploy/smoke-test.sh http://localhost:8080; then
+            docker logs shiftreason
+            exit 1
+          fi
+          docker logs shiftreason 2>&1 | grep -F "CP-SAT workers=2 (ProcessorCount=2)" \
+            || { echo "Solver did not size itself from the CPU quota"; docker logs shiftreason; exit 1; }
+
+      - name: Report image size
+        if: always()
+        run: |
+          bytes=$(docker image inspect shiftreason:ci --format '{{.Size}}' 2>/dev/null || echo 0)
+          echo "Image size: $(( bytes / 1024 / 1024 )) MB" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Push the image that passed the smoke test, not a fresh rebuild of it.
+      - name: Publish
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          REPO: ${{ steps.names.outputs.repo }}
+          IMAGE: ${{ steps.names.outputs.image }}
+        run: |
+          docker tag shiftreason:ci "$IMAGE"
+          docker tag shiftreason:ci "$REPO:latest"
+          docker push "$IMAGE"
+          docker push "$REPO:latest"
+          echo "Published \`$IMAGE\`" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy-app:
+    name: Deploy to Azure Container Apps
+    needs: image
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.AZURE_CONTAINERAPP_NAME != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write   # OIDC: exchanges a short-lived GitHub token; no stored password
+    concurrency:
+      group: deploy-app
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # A new revision with the immutable sha- tag. :latest is never deployed,
+      # so every revision in Azure maps to exactly one commit.
+      - name: Roll out
+        id: rollout
+        env:
+          APP: ${{ vars.AZURE_CONTAINERAPP_NAME }}
+          GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          IMAGE: ${{ needs.image.outputs.image }}
+        run: |
+          az extension add --name containerapp --upgrade --yes --only-show-errors
+          az containerapp update --name "$APP" --resource-group "$GROUP" --image "$IMAGE" --only-show-errors -o none
+          fqdn=$(az containerapp show --name "$APP" --resource-group "$GROUP" \
+                   --query properties.configuration.ingress.fqdn -o tsv)
+          echo "url=https://${fqdn}" >> "$GITHUB_OUTPUT"
+          echo "Live: https://${fqdn}" >> "$GITHUB_STEP_SUMMARY"
+
+      # Same checks as against the local image, now through Azure's ingress. The
+      # replica is usually scaled to zero, so the first request cold-starts it.
+      - name: Smoke test the live app
+        env:
+          URL: ${{ steps.rollout.outputs.url }}
+          READY_TIMEOUT: '300'
+        run: bash deploy/smoke-test.sh "$URL"
+
+  deploy-demo:
+    name: Deploy static demo to Cloudflare Pages
+    needs: [dotnet, web]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.CLOUDFLARE_PAGES_PROJECT != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: static-demo
+          path: dist
+
+      - uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: >-
+            pages deploy dist
+            --project-name=${{ vars.CLOUDFLARE_PAGES_PROJECT }}
+            --branch=main
+            --commit-hash=${{ github.sha }}
+            --commit-dirty=true

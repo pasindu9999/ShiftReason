@@ -1,0 +1,22 @@
+# Run the production image locally:
+#
+#   docker compose up --build        ->  http://localhost:8080
+#
+# The same image CI smoke-tests and Azure runs. The named volume keeps run history
+# across restarts; the image creates /data owned by its non-root user, and Docker
+# copies that ownership into a new named volume on first mount.
+
+services:
+  shiftreason:
+    build: .
+    image: shiftreason:local
+    ports:
+      - "8080:8080"
+    volumes:
+      - shiftreason-data:/data
+    # Uncomment to try the app under a production-sized CPU quota. The startup
+    # log reports the worker count the solver chose from it.
+    # cpus: 4
+
+volumes:
+  shiftreason-data:

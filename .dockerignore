@@ -1,0 +1,31 @@
+# Keep the build context small and the image honest: nothing built on the
+# developer's machine may leak into the container. Every artefact in the image
+# is produced inside the Dockerfile.
+
+**/bin/
+**/obj/
+**/node_modules/
+**/dist/
+**/TestResults/
+
+# The frontend is built in its own stage. A stale local build copied in here
+# would silently be served instead of the one the image just produced.
+src/ShiftReason.Api/wwwroot/
+
+# Local databases and solver scratch.
+**/*.db
+**/*.db-shm
+**/*.db-wal
+
+# Not needed to build the app.
+.git/
+.github/
+.vs/
+.vscode/
+.idea/
+docs/
+deploy/
+scripts/
+spike/
+tests/
+*.md

@@ -51,6 +51,40 @@ describe('recorded traces', () => {
   })
 })
 
+describe('follow-up recordings', () => {
+  const followUps = traces.filter((t) => t.followUpOf)
+
+  it('exist for every impossible ward, so the static demo can finish the story', () => {
+    const impossible = traces.filter((t) => !t.followUpOf && t.completed.status === 'Infeasible')
+    expect(impossible.length).toBeGreaterThan(0)
+    for (const parent of impossible) {
+      expect(followUps.some((f) => f.followUpOf === parent.id)).toBe(true)
+    }
+  })
+
+  it('relax exactly the cheapest fix their parent recommended, and then solve', () => {
+    for (const followUp of followUps) {
+      const parent = byId(followUp.followUpOf!)
+      const cheapest = parent.explanation!.fixes[0].rules.map((r) => r.ruleId).sort()
+
+      // If these drift apart, pressing "give this up" on the static demo would
+      // play a solve of some other relaxation than the one on the button.
+      expect([...followUp.started.relaxedRuleIds].sort()).toEqual(cheapest)
+      expect(followUp.started.scenarioId).toBe(parent.started.scenarioId)
+
+      const state = replayAll(followUp)
+      expect(state.status).toBe('completed')
+      expect(state.penalties.length).toBeGreaterThan(0)
+    }
+  })
+
+  it('leave a feasible recording first in line, since that is what autoplays', () => {
+    const first = traces.find((t) => !t.followUpOf)!
+    expect(first.completed.status).toBe('Completed')
+    expect(first.frames.length).toBeGreaterThan(5)
+  })
+})
+
 describe('runReducer', () => {
   it('replays a recording to the objective the solver actually reported', () => {
     const trace = byId('large-ward')
@@ -86,6 +120,25 @@ describe('runReducer', () => {
     state = runReducer(state, { type: 'improved', payload: trace.frames[1] })
     expect(state.changed.size).toBeGreaterThan(0)
     expect(state.changed.size).toBeLessThanOrEqual(trace.frames[1].changes.length)
+  })
+
+  it('ends a replay that is stopped part-way, keeping the frames already shown', () => {
+    const trace = byId('large-ward')
+
+    let state = runReducer(initialRunState, { type: 'started', payload: trace.started })
+    state = runReducer(state, { type: 'improved', payload: trace.frames[0] })
+    state = runReducer(state, { type: 'improved', payload: trace.frames[1] })
+    state = runReducer(state, { type: 'stopped' })
+
+    // Still "running" here would disable every control on the page.
+    expect(state.status).toBe('cancelled')
+    expect(state.improvements).toBe(2)
+    expect(state.objective).toBe(trace.frames[1].objective)
+  })
+
+  it('treats stopping an already finished run as a no-op', () => {
+    const state = replayAll(byId('large-ward'))
+    expect(runReducer(state, { type: 'stopped' })).toBe(state)
   })
 
   it('ignores a frame that arrives out of order', () => {

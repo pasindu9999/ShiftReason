@@ -25,6 +25,15 @@ export interface SolveRunController {
   reset: () => void
 }
 
+export interface SolveRunOptions {
+  /**
+   * False on the static demo build. There is no hub to reach, and a doomed
+   * WebSocket handshake followed by retries would only put errors in the console
+   * of the one page a recruiter is guaranteed to open.
+   */
+  connect?: boolean
+}
+
 /**
  * Owns one run: live over SignalR, or replayed from a recording.
  *
@@ -32,22 +41,26 @@ export interface SolveRunController {
  * explanation drawer and the penalty panel cannot drift between the two. The
  * published demo is the replay path, which is why it has to be the real one.
  */
-export function useSolveRun(): SolveRunController {
+export function useSolveRun({ connect = true }: SolveRunOptions = {}): SolveRunController {
   const [state, dispatch] = useReducer(runReducer, initialRunState)
-  const [connection, setConnection] = useState<ConnectionState>('connecting')
+  const [connection, setConnection] = useState<ConnectionState>(connect ? 'connecting' : 'offline')
   const [replaying, setReplaying] = useState(false)
 
   const hub = useRef<HubConnection | null>(null)
   const watching = useRef<string | null>(null)
   const replayTimers = useRef<number[]>([])
+  const replayingRef = useRef(false)
 
   const clearReplay = useCallback(() => {
     for (const t of replayTimers.current) window.clearTimeout(t)
     replayTimers.current = []
+    replayingRef.current = false
     setReplaying(false)
   }, [])
 
   useEffect(() => {
+    if (!connect) return
+
     const c = new HubConnectionBuilder()
       .withUrl('/hubs/solve')
       .withAutomaticReconnect()
@@ -80,7 +93,7 @@ export function useSolveRun(): SolveRunController {
       hub.current = null
       void c.stop()
     }
-  }, [])
+  }, [connect])
 
   const solve = useCallback(
     async (request: SolveRequest) => {
@@ -110,7 +123,15 @@ export function useSolveRun(): SolveRunController {
   )
 
   const stop = useCallback(async () => {
-    clearReplay()
+    // A recording is stopped locally. Sending it to the cancel endpoint would be
+    // wrong twice over: the run id belongs to a solve that finished long ago, and
+    // on the static demo there is no server to receive the request.
+    if (replayingRef.current) {
+      clearReplay()
+      dispatch({ type: 'stopped' })
+      return
+    }
+
     if (state.runId) await cancelRun(state.runId)
   }, [state.runId, clearReplay])
 
@@ -122,6 +143,7 @@ export function useSolveRun(): SolveRunController {
   const replay = useCallback(
     (trace: RecordedTrace, speed = 1) => {
       clearReplay()
+      replayingRef.current = true
       setReplaying(true)
 
       dispatch({ type: 'started', payload: trace.started })
@@ -145,7 +167,10 @@ export function useSolveRun(): SolveRunController {
         )
       }
 
-      schedule(end + 900, () => setReplaying(false))
+      schedule(end + 900, () => {
+        replayingRef.current = false
+        setReplaying(false)
+      })
     },
     [clearReplay],
   )

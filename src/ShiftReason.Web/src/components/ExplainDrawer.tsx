@@ -7,13 +7,18 @@ interface Props {
   onHighlight: (refs: RuleDto['refs'] | null) => void
   onRelax: (ruleIds: string[], label: string) => void
   busy: boolean
+  /**
+   * Whether "give this up" can actually be carried out. Always true against the
+   * live solver; on the static demo only when that exact relaxation was recorded.
+   */
+  canRelax?: (ruleIds: string[]) => boolean
 }
 
 /**
  * The half of the product that does not exist anywhere else: not "no feasible
  * solution", but which rules collide and what it costs to give each of them up.
  */
-export function ExplainDrawer({ state, onHighlight, onRelax, busy }: Props) {
+export function ExplainDrawer({ state, onHighlight, onRelax, busy, canRelax = () => true }: Props) {
   const [tab, setTab] = useState<'why' | 'fixes'>('why')
   const explanation = state.explanation
 
@@ -117,7 +122,12 @@ export function ExplainDrawer({ state, onHighlight, onRelax, busy }: Props) {
                   cost {fix.totalCost}
                 </span>
                 <button
-                  disabled={busy}
+                  disabled={busy || !canRelax(fix.rules.map((r) => r.ruleId))}
+                  title={
+                    canRelax(fix.rules.map((r) => r.ruleId))
+                      ? undefined
+                      : 'Only the cheapest option was recorded for the static demo — try the others on the live solver'
+                  }
                   onClick={() =>
                     onRelax(
                       fix.rules.map((r) => r.ruleId),

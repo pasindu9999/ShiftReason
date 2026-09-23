@@ -122,6 +122,12 @@ export interface SolveRequest {
 export interface RecordedTrace {
   id: string
   label: string
+  /**
+   * A relaxed re-solve of another recording. Not listed as its own button: it is
+   * what the static demo plays when someone presses "give this up" on the parent,
+   * so the impossible → explained → relaxed → solved story works with no backend.
+   */
+  followUpOf?: string
   started: RunStarted
   frames: RosterDelta[]
   completed: RunCompleted

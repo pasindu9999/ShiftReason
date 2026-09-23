@@ -13,6 +13,8 @@ interface Props {
   replaying: boolean
   onSolve: () => void
   onStop: () => void
+  /** Static build: no preset picker or Solve button, only replay controls. */
+  demoOnly?: boolean
 }
 
 export function SolveBar({
@@ -26,24 +28,27 @@ export function SolveBar({
   replaying,
   onSolve,
   onStop,
+  demoOnly = false,
 }: Props) {
   const running = isRunning(state.status) || replaying
   const offline = connection === 'offline'
 
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-lg border border-black/10 dark:border-white/10 bg-white/70 dark:bg-white/5 px-3 py-2">
-      <select
-        value={selected}
-        onChange={(e) => onSelect(e.target.value)}
-        disabled={running}
-        className="rounded-md border border-black/15 dark:border-white/15 bg-transparent px-2 py-1.5 text-sm disabled:opacity-50"
-      >
-        {presets.map((p) => (
-          <option key={p.id} value={p.id}>
-            {p.name} — {p.employees} nurses, {p.days} days
-          </option>
-        ))}
-      </select>
+      {!demoOnly && (
+        <select
+          value={selected}
+          onChange={(e) => onSelect(e.target.value)}
+          disabled={running}
+          className="rounded-md border border-black/15 dark:border-white/15 bg-transparent px-2 py-1.5 text-sm disabled:opacity-50"
+        >
+          {presets.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name} — {p.employees} nurses, {p.days} days
+            </option>
+          ))}
+        </select>
+      )}
 
       {running ? (
         <button
@@ -52,7 +57,7 @@ export function SolveBar({
         >
           Stop
         </button>
-      ) : (
+      ) : demoOnly ? null : (
         <button
           onClick={onSolve}
           disabled={offline}
@@ -63,18 +68,20 @@ export function SolveBar({
         </button>
       )}
 
-      <label
-        className="flex items-center gap-1.5 text-xs opacity-80"
-        title="Pins the seed and uses CP-SAT's deterministic search loop, so the same input reproduces the same roster. It costs real throughput — the objective will be noticeably worse for the same time budget."
-      >
-        <input
-          type="checkbox"
-          checked={reproducible}
-          onChange={(e) => onReproducibleChange(e.target.checked)}
-          disabled={running}
-        />
-        Reproducible
-      </label>
+      {!demoOnly && (
+        <label
+          className="flex items-center gap-1.5 text-xs opacity-80"
+          title="Pins the seed and uses CP-SAT's deterministic search loop, so the same input reproduces the same roster. It costs real throughput — the objective will be noticeably worse for the same time budget."
+        >
+          <input
+            type="checkbox"
+            checked={reproducible}
+            onChange={(e) => onReproducibleChange(e.target.checked)}
+            disabled={running}
+          />
+          Reproducible
+        </label>
+      )}
 
       <div className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-1 text-xs tabular-nums">
         <Stat label="elapsed" value={`${state.seconds.toFixed(1)}s`} />
@@ -109,7 +116,11 @@ function StatusPill({
 }) {
   const [text, tone] = describe(state, replaying, connection)
   return (
-    <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${tone}`}>{text}</span>
+    // role="status" makes this a polite live region, so a screen reader announces
+    // "solved" or "impossible" without the user having to go looking for it.
+    <span role="status" className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${tone}`}>
+      {text}
+    </span>
   )
 }
 

@@ -18,18 +18,35 @@ import { join } from 'node:path'
 const API = process.env.SHIFTREASON_API ?? 'http://localhost:5217'
 const OUT = join(process.cwd(), 'src', 'ShiftReason.Web', 'public', 'demo', 'traces')
 
+// Order matters: the first listed recording is the one the static demo autoplays.
+// A follow-up relaxes its parent's cheapest fix and re-solves for real, so the
+// static demo can play the whole impossible -> explained -> relaxed -> solved
+// story when someone presses "give this up", with no backend behind it.
 const DEMOS = [
   {
+    id: 'large-ward',
     label: 'Large ward — watch it improve',
     request: { presetId: 'large-ward', seconds: 20 },
   },
   {
+    id: 'night-crunch',
     label: 'Night certification crunch — impossible, explained',
     request: { presetId: 'night-crunch', seconds: 10 },
   },
   {
-    label: 'Flu season surge — impossible',
+    id: 'night-crunch+cheapest-fix',
+    label: 'Night certification crunch — cheapest fix applied',
+    followUpOf: 'night-crunch',
+  },
+  {
+    id: 'flu-season',
+    label: 'Flu season surge — impossible, explained',
     request: { presetId: 'flu-season', seconds: 15 },
+  },
+  {
+    id: 'flu-season+cheapest-fix',
+    label: 'Flu season surge — cheapest fix applied',
+    followUpOf: 'flu-season',
   },
 ]
 
@@ -51,8 +68,20 @@ async function jsonOrNull(url) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
-async function record({ label, request }) {
-  process.stdout.write(`  ${request.presetId} … `)
+/** Builds a follow-up's request from what its parent recording was told to give up. */
+function followUpRequest(parent) {
+  const cheapest = parent.explanation?.fixes?.[0]
+  if (!cheapest) throw new Error(`recording '${parent.id}' has no fix to apply`)
+  return {
+    presetId: parent.started.scenarioId,
+    seconds: 15,
+    relaxRuleIds: cheapest.rules.map((r) => r.ruleId),
+    parentRunId: parent.started.runId,
+  }
+}
+
+async function record({ id, label, request }) {
+  process.stdout.write(`  ${id} … `)
 
   const { runId } = await json(`${API}/api/solve`, {
     method: 'POST',
@@ -83,7 +112,7 @@ async function record({ label, request }) {
 
   const trace = await json(`${API}/api/runs/${runId}/recording`)
   trace.label = label
-  trace.id = request.presetId
+  trace.id = id
 
   console.log(
     `${run.status}, ${trace.frames.length} frames, ` +
@@ -94,14 +123,26 @@ async function record({ label, request }) {
 
 const traces = []
 console.log(`Recording demo traces from ${API}`)
-for (const demo of DEMOS) traces.push(await record(demo))
+for (const demo of DEMOS) {
+  if (demo.followUpOf) {
+    const parent = traces.find((t) => t.id === demo.followUpOf)
+    if (!parent) throw new Error(`'${demo.id}' follows '${demo.followUpOf}', which was not recorded first`)
+    const trace = await record({ ...demo, request: followUpRequest(parent) })
+    trace.followUpOf = demo.followUpOf
+    if (trace.completed.status !== 'Completed') {
+      throw new Error(`applying the cheapest fix to '${parent.id}' did not produce a roster`)
+    }
+    traces.push(trace)
+  } else {
+    traces.push(await record(demo))
+  }
+}
 
+// One minified file: the client needs every recording on load anyway, and it is
+// shipped on the static site, so pretty-printed per-trace copies would only
+// multiply the payload without anything reading them.
 await mkdir(OUT, { recursive: true })
 await writeFile(join(OUT, 'index.json'), JSON.stringify(traces))
-
-for (const trace of traces) {
-  await writeFile(join(OUT, `${trace.id}.json`), JSON.stringify(trace, null, 2))
-}
 
 const bytes = Buffer.byteLength(JSON.stringify(traces))
 console.log(`\nWrote ${traces.length} traces to ${OUT} (${(bytes / 1024).toFixed(0)} kB)`)

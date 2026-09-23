@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.SignalR.Client;
 using ShiftReason.Api.Contracts;
@@ -169,6 +170,29 @@ public sealed class SolvePipelineTests(ITestOutputHelper output) : IClassFixture
 
         Assert.True(sawSolution || solutions == 0,
             "frames were reported but none reached the client");
+    }
+
+    /// <summary>
+    /// The public endpoint that starts solves has a global budget. Rejected presets
+    /// are used deliberately: the limiter runs before the handler, so they spend
+    /// permits without spending any solver time, and the test stays fast.
+    /// </summary>
+    [Fact]
+    public async Task Solve_requests_beyond_the_budget_are_rejected()
+    {
+        using var limited = _api.WithWebHostBuilder(b => b.UseSetting("RateLimiting:SolvesPerMinute", "2"));
+        var client = limited.CreateClient();
+
+        var codes = new List<HttpStatusCode>();
+        for (var i = 0; i < 3; i++)
+        {
+            var response = await client.PostAsJsonAsync("/api/solve", new SolveRequest("no-such-ward"));
+            codes.Add(response.StatusCode);
+        }
+
+        Assert.Equal(
+            [HttpStatusCode.BadRequest, HttpStatusCode.BadRequest, HttpStatusCode.TooManyRequests],
+            codes);
     }
 
     [Fact]

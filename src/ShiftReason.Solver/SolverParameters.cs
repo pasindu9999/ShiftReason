@@ -15,15 +15,39 @@ public static class SolverParameters
     /// Worker count, taken from .NET rather than left to CP-SAT.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <c>num_workers:0</c> makes CP-SAT call <c>std::thread::hardware_concurrency()</c>,
     /// which reports <em>host</em> cores and ignores the cgroup CPU quota. In a
     /// container limited to one CPU on a 16-core host that spawns 16 workers to
-    /// fight over one core — CFS throttling, and measurably worse than a single
-    /// worker. <see cref="Environment.ProcessorCount"/> is cgroup-aware, so we
-    /// set it ourselves. One core is held back for Kestrel: starve it and SignalR
-    /// heartbeats miss, and clients drop mid-solve.
+    /// fight over one core. <see cref="Environment.ProcessorCount"/> is
+    /// cgroup-aware, so we set the count ourselves.
+    /// </para>
+    /// <para>
+    /// The floor of two is measured, not a guess. A single worker gets one
+    /// full-problem subsolver and nothing else — no LNS, no feasibility jump — and
+    /// on the 44-nurse ward it cannot find even a <em>first</em> roster inside ten
+    /// seconds; eight tests fail. Two workers pass all of them with improvements
+    /// spread across the whole solve. So the rule is "leave a core for Kestrel when
+    /// there is one to spare", never at the cost of dropping to one worker: a
+    /// 2-vCPU container or a 2-core CI runner runs both workers and lets the OS
+    /// share the rest, because SignalR's traffic is tiny next to losing the solver.
+    /// </para>
+    /// <para>
+    /// <c>SHIFTREASON_SOLVER_WORKERS</c> overrides all of this, for tuning a
+    /// deployment without a rebuild. The explanation solve is unaffected: CP-SAT
+    /// only honours assumptions with exactly one worker.
+    /// </para>
     /// </remarks>
-    public static int Workers => Math.Max(1, Environment.ProcessorCount - 1);
+    public static int Workers { get; } = ResolveWorkers();
+
+    internal static int ResolveWorkers(string? configured = null, int? processorCount = null)
+    {
+        configured ??= Environment.GetEnvironmentVariable("SHIFTREASON_SOLVER_WORKERS");
+        if (int.TryParse(configured, out var n) && n > 0) return n;
+
+        var cores = processorCount ?? Environment.ProcessorCount;
+        return Math.Max(2, cores - 1);
+    }
 
     private const string Quiet = "log_search_progress:true,log_to_stdout:false";
 

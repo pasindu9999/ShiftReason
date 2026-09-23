@@ -64,12 +64,37 @@ export function PenaltyPanel({ state, baseline }: Props) {
       </table>
 
       {state.bestBound !== null && state.objective !== null && (
-        <p className="mt-2 text-[11px] opacity-55">
-          Best proven lower bound {state.bestBound.toLocaleString()} — the gap is wide
-          because min-max fairness has a weak linear relaxation, so CP-SAT finds good
-          rosters long before it can prove one optimal.
-        </p>
+        <BoundNote objective={state.objective} bound={state.bestBound} />
       )}
     </section>
+  )
+}
+
+/**
+ * What the lower bound says about this roster.
+ *
+ * Worded from the numbers rather than fixed text: small wards are routinely
+ * proven optimal, and a note explaining why "the gap is wide" beside a bound that
+ * equals the objective would be telling the reader the opposite of the truth.
+ */
+function BoundNote({ objective, bound }: { objective: number; bound: number }) {
+  // The objective is integral, so anything under one unit of gap is closed.
+  const gap = objective - bound
+  if (gap < 0.5) {
+    return (
+      <p className="mt-2 text-[11px] opacity-55">
+        Proven optimal — CP-SAT closed the gap, so no roster with a lower cost exists
+        under these rules.
+      </p>
+    )
+  }
+
+  const percent = objective > 0 ? Math.round((gap / objective) * 100) : 100
+  return (
+    <p className="mt-2 text-[11px] opacity-55">
+      Best proven lower bound {bound.toLocaleString()} ({percent}% gap). A wide gap is
+      expected here: min-max fairness has a weak linear relaxation, so CP-SAT finds
+      good rosters long before it can prove one optimal.
+    </p>
   )
 }

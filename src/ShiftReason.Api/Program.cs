@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using ShiftReason.Api.Contracts;
 using ShiftReason.Api.Persistence;
@@ -32,11 +34,40 @@ builder.Services.AddCors(options => options.AddPolicy(DevCors, policy => policy
     .AllowAnyMethod()
     .AllowCredentials()));
 
+// One global budget for the endpoint that starts solves. Each accepted request can
+// occupy every core for up to a minute, and this runs unauthenticated on a public
+// URL, so the limit is on total solver work rather than per client: a per-IP limit
+// would do nothing against a script cycling addresses, and the single worker is a
+// shared resource either way. Humans clicking Solve never come close to it.
+const string SolveLimit = "solve";
+var solvesPerMinute = builder.Configuration.GetValue("RateLimiting:SolvesPerMinute", 30);
+
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddFixedWindowLimiter(SolveLimit, limiter =>
+    {
+        limiter.PermitLimit = solvesPerMinute;
+        limiter.Window = TimeSpan.FromMinutes(1);
+        limiter.QueueLimit = 0;
+    });
+});
+
 var app = builder.Build();
+
+// Logged once at startup because it is the number that decides whether the live
+// grid streams or stalls, and in a container it depends on the CPU quota rather
+// than on the host. CI asserts on this line to prove the quota is honoured.
+app.Logger.LogInformation(
+    "CP-SAT workers={Workers} (ProcessorCount={Cores})",
+    SolverParameters.Workers,
+    Environment.ProcessorCount);
 
 await InitialiseDatabaseAsync(app);
 
 if (app.Environment.IsDevelopment()) app.UseCors(DevCors);
+
+app.UseRateLimiter();
 
 // The API and the SPA ship in one container, so the built frontend is served
 // from here and there is no cross-origin problem in production.
@@ -100,7 +131,7 @@ app.MapPost("/api/solve", (SolveRequest request, SolveQueue queue) =>
     return queue.TryEnqueue(job)
         ? Results.Accepted($"/api/runs/{runId}", new SolveAccepted(runId, request.PresetId))
         : Results.Json(new { error = "Solver queue is full, try again shortly." }, statusCode: 503);
-});
+}).RequireRateLimiting(SolveLimit);
 
 app.MapPost("/api/runs/{runId}/cancel", (string runId, SolveQueue queue) =>
     queue.Cancel(runId)

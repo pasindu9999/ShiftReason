@@ -4,6 +4,7 @@ import { PenaltyPanel } from './components/PenaltyPanel'
 import { RosterGrid, ShiftLegend } from './components/RosterGrid'
 import { SolveBar } from './components/SolveBar'
 import { getPresets } from './lib/api'
+import { DEMO_ONLY, LIVE_URL, REPO_URL } from './lib/config'
 import { cellsForRefs, isRunning } from './lib/runReducer'
 import { useSolveRun } from './lib/useSolveRun'
 import type { PenaltyLine, PresetSummary, RecordedTrace, RuleDto } from './lib/types'
@@ -15,7 +16,7 @@ interface Baseline {
 }
 
 export default function App() {
-  const { state, connection, replaying, solve, stop, replay } = useSolveRun()
+  const { state, connection, replaying, solve, stop, replay } = useSolveRun({ connect: !DEMO_ONLY })
 
   const [presets, setPresets] = useState<PresetSummary[]>([])
   const [selected, setSelected] = useState('large-ward')
@@ -27,14 +28,17 @@ export default function App() {
   const [error, setError] = useState<string | null>(null)
 
   const lastFeasible = useRef<Baseline | null>(null)
+  const autoplayed = useRef(false)
 
   useEffect(() => {
-    getPresets()
-      .then((p) => {
-        setPresets(p)
-        if (p.length > 0 && !p.some((x) => x.id === selected)) setSelected(p[0].id)
-      })
-      .catch(() => setPresets([]))
+    if (!DEMO_ONLY) {
+      getPresets()
+        .then((p) => {
+          setPresets(p)
+          if (p.length > 0 && !p.some((x) => x.id === selected)) setSelected(p[0].id)
+        })
+        .catch(() => setPresets([]))
+    }
 
     // Recorded runs, published alongside the static build. These are what make
     // the demo link work whether or not a backend is awake.
@@ -43,6 +47,31 @@ export default function App() {
       .then(setTraces)
       .catch(() => setTraces([]))
   }, [])
+
+  const listedTraces = useMemo(() => traces.filter((t) => !t.followUpOf), [traces])
+
+  useEffect(() => {
+    if (!DEMO_ONLY || autoplayed.current || listedTraces.length === 0) return
+    autoplayed.current = true
+    replay(listedTraces[0])
+  }, [listedTraces, replay])
+
+  /** A recorded relaxed re-solve of the ward on screen, if one exists for these rules. */
+  const recordedFollowUp = useCallback(
+    (ruleIds: string[]) => {
+      const wanted = new Set(ruleIds)
+      return traces.find(
+        (t) =>
+          t.followUpOf !== undefined &&
+          t.started.scenarioId === state.scenarioId &&
+          t.started.relaxedRuleIds.length === wanted.size &&
+          t.started.relaxedRuleIds.every((id) => wanted.has(id)),
+      )
+    },
+    [traces, state.scenarioId],
+  )
+
+  const live = connection === 'connected'
 
   // Remember the last roster that actually worked, so a later relaxation can be
   // priced against it rather than against nothing.
@@ -90,9 +119,22 @@ export default function App() {
       )
       const next = [...relaxed, ...rules.filter((r) => !relaxed.some((x) => x.ruleId === r.ruleId))]
       setRelaxed(next)
-      void run(next.map((r) => r.ruleId))
+
+      if (live) {
+        void run(next.map((r) => r.ruleId))
+        return
+      }
+
+      // No solver to ask: play the recorded re-solve of exactly this relaxation.
+      const followUp = recordedFollowUp(next.map((r) => r.ruleId))
+      if (followUp) replay(followUp)
     },
-    [relaxed, state.explanation, run],
+    [relaxed, state.explanation, run, live, recordedFollowUp, replay],
+  )
+
+  const canRelax = useCallback(
+    (ruleIds: string[]) => live || recordedFollowUp([...relaxed.map((r) => r.ruleId), ...ruleIds]) !== undefined,
+    [live, recordedFollowUp, relaxed],
   )
 
   const highlight = useMemo(
@@ -105,12 +147,19 @@ export default function App() {
   return (
     <div className="mx-auto max-w-[1400px] p-4 sm:p-6 space-y-4">
       <header className="space-y-1">
-        <h1 className="text-xl font-bold tracking-tight">
-          ShiftReason
-          <span className="ml-2 text-sm font-normal opacity-60">
-            rostering that explains itself
-          </span>
-        </h1>
+        <div className="flex flex-wrap items-baseline gap-x-3">
+          <h1 className="text-xl font-bold tracking-tight">
+            ShiftReason
+            <span className="ml-2 text-sm font-normal opacity-60">
+              rostering that explains itself
+            </span>
+          </h1>
+          {REPO_URL && (
+            <a href={REPO_URL} className="text-xs underline opacity-60 hover:opacity-100">
+              source on GitHub
+            </a>
+          )}
+        </div>
         <p className="max-w-3xl text-sm opacity-70">
           Every rostering tool answers “here is your schedule” or “no feasible
           solution”. This one answers <em>why</em> a ward is impossible — a minimal set
@@ -119,7 +168,25 @@ export default function App() {
         </p>
       </header>
 
+      {DEMO_ONLY && (
+        <div className="rounded-lg border border-sky-500/30 bg-sky-500/5 px-3 py-2 text-xs">
+          <span className="font-semibold">You are watching recorded solves.</span>{' '}
+          Every frame below came from the real CP-SAT engine and is replayed through the
+          same client code a live run uses — nothing is mocked.
+          {LIVE_URL ? (
+            <>
+              {' '}
+              <a href={LIVE_URL} className="font-semibold underline">
+                Open the live solver
+              </a>{' '}
+              <span className="opacity-60">(it scales to zero when idle, so the first load can take up to half a minute)</span>
+            </>
+          ) : null}
+        </div>
+      )}
+
       <SolveBar
+        demoOnly={DEMO_ONLY}
         presets={presets}
         selected={selected}
         onSelect={setSelected}
@@ -132,10 +199,10 @@ export default function App() {
         onStop={() => void stop()}
       />
 
-      {traces.length > 0 && (
+      {listedTraces.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <span className="opacity-60">Recorded runs:</span>
-          {traces.map((t) => (
+          {listedTraces.map((t) => (
             <button
               key={t.id}
               disabled={busy}
@@ -181,6 +248,7 @@ export default function App() {
         onHighlight={setHighlightRefs}
         onRelax={onRelax}
         busy={busy}
+        canRelax={canRelax}
       />
 
       <div className="flex items-center justify-between gap-4">
