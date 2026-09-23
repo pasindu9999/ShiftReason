@@ -17,6 +17,10 @@
 
 set -euo pipefail
 
+# Git Bash on Windows rewrites arguments that look like paths, so Azure scopes such
+# as /subscriptions/... would reach az as C:/Program Files/Git/subscriptions/...
+export MSYS_NO_PATHCONV=1
+
 cd "$(dirname "$0")/../.."
 
 RESOURCE_GROUP="${RESOURCE_GROUP:-rg-shiftreason}"
